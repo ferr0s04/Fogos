@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  fogos:
+    build: .
+    container_name: fogos
+    volumes:
+      - .:/app
+    environment:
+      - TZ=Europe/Lisbon
+    entrypoint: ["/usr/local/bin/supercronic", "/app/cronjob"]
