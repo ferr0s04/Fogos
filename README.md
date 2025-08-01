@@ -9,6 +9,7 @@ Este projeto monitoriza incêndios ativos em Portugal usando a API do Fogos.pt e
 - Raio de procura customizado por local.
 - Email com detalhes dos incêndios próximos, incluindo coordenadas que redirecionam para o Google Maps.
 - Execução automática a cada 15 minutos via supercronic (com Docker).
+- Evita o envio repetido de alertas para o mesmo incêndio, apenas quando muda de estado.
 
 ## Instalação e Uso
 

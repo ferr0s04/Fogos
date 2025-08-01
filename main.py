@@ -5,6 +5,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dotenv import load_dotenv
 import os
+import json
 
 load_dotenv()
 
@@ -20,8 +21,8 @@ LOCAIS = {
     "Ramos Ferreira": tuple(float(coord.strip()) for coord in os.getenv("COORDS_RF", "0,0").split(",")),
 }
 
-# 🎯 Raio de busca em km
 RAIO_KM = 8
+REGISTO_INCENDIOS = "incendios_reportados.json"
 
 def enviar_email(assunto, corpo):
     """Envia um e-mail usando SMTP do Gmail"""
@@ -75,8 +76,6 @@ def dentro_raio(lat, lng, raio_km, origem):
     distancia = geodesic(origem, (lat, lng)).km
     return distancia <= raio_km, distancia
 
-
-
 def incendios_proximos_por_local():
     """Retorna incêndios dentro do raio para cada local, com raio customizado"""
     resultados = {}
@@ -88,6 +87,11 @@ def incendios_proximos_por_local():
             raio = RAIO_KM
         proximos = []
         for incendio in incendios:
+            status = incendio.get("status", "N/A")
+            # Ignorar incêndios com estados específicos
+            if status in ["Conclusão", "Vigilância"]:
+                continue
+
             lat = incendio.get("lat")
             lng = incendio.get("lng")
             if lat is not None and lng is not None:
@@ -101,15 +105,40 @@ def incendios_proximos_por_local():
         resultados[nome] = proximos
     return resultados
 
+def ler_registro():
+    """Lê o arquivo de registro de incêndios reportados."""
+    if not os.path.exists(REGISTO_INCENDIOS):
+        return []
+    with open(REGISTO_INCENDIOS, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+def gravar_registro(registro):
+    """Grava o registro de incêndios reportados no arquivo."""
+    with open(REGISTO_INCENDIOS, "w", encoding="utf-8") as f:
+        json.dump(registro, f, ensure_ascii=False, indent=4)
+
+def incendios_nao_reportados(incendios):
+    """Filtra incêndios que ainda não foram reportados ou cujo status mudou."""
+    registro_existente = ler_registro()
+    novos_incendios = []
+    for incendio in incendios:
+        id_incendio = incendio.get("id")
+        status = incendio.get("status")
+        registrado = next((r for r in registro_existente if r["id"] == id_incendio), None)
+        if not registrado or registrado["status"] != status:
+            novos_incendios.append(incendio)
+    return novos_incendios
 
 if __name__ == "__main__":
     resultados = incendios_proximos_por_local()
 
     texto_email = ""
     houve_incendios = False
+    registro_atualizado = ler_registro()
+
     for nome, proximos in resultados.items():
         raio_local = 3 if nome in ["Casa Pai", "Ramos Ferreira"] else RAIO_KM
+        proximos = incendios_nao_reportados(proximos)
         if proximos:
             houve_incendios = True
             texto_email += f"<h3>🔥 Incêndios num raio de {raio_local} km de {nome}:</h3><br>"
@@ -121,19 +150,20 @@ if __name__ == "__main__":
                 lng = inc.get("lng")
                 maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lng}" if lat and lng else ""
                 status = inc.get("status", "N/A")
-            coord_link = f'<a href="{maps_url}">{lat}, {lng}</a>' if maps_url else f"{lat}, {lng}"
-            info = (
-                f"<b>- {inc['location']} ({inc['concelho']}) - {inc['distancia_km']} km</b><br>"
-                f"🟠 <b>Status:</b> {status}<br>"
-                f"🌍 <b>Coordenadas:</b> {coord_link}<br>"
-                f"👨‍🚒 <b>Operacionais:</b> {operacionais}<br>"
-                f"🚒 <b>Veículos terrestres:</b> {veiculos}<br>"
-                f"✈️ <b>Meios aéreos:</b> {aereos}<br><br>"
-            )
-            texto_email += info
+                coord_link = f'<a href="{maps_url}">{lat}, {lng}</a>' if maps_url else f"{lat}, {lng}"
+                info = (
+                    f"<b>- {inc['location']} ({inc['concelho']}) - {inc['distancia_km']} km</b><br>"
+                    f"🟠 <b>Status:</b> {status}<br>"
+                    f"🌍 <b>Coordenadas:</b> {coord_link}<br>"
+                    f"👨‍🚒 <b>Operacionais:</b> {operacionais}<br>"
+                    f"🚒 <b>Veículos terrestres:</b> {veiculos}<br>"
+                    f"✈️ <b>Meios aéreos:</b> {aereos}<br><br>"
+                )
+                texto_email += info
+                registro_atualizado.append({"id": inc["id"], "status": status})
         else:
             texto_email += f"<h3>✅ Nenhum incêndio num raio de {raio_local} km de {nome}.</h3><br>"
 
     if houve_incendios:
         enviar_email("🔥 Alerta de Incêndio Próximo", texto_email)
-
+        gravar_registro(registro_atualizado)
